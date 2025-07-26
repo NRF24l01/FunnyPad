@@ -2,7 +2,7 @@ qt6_wrap_ui(ui_files main_window.ui)
 
 add_library(ui STATIC
     main_window.cpp
-    main_window.h
+    main_window.hpp
     main.ui
 )
 

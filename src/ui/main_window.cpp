@@ -1,4 +1,4 @@
-#include "main_window.h"
+#include "main_window.hpp"
 #include "ui_main.h"
 #include <QMessageBox>
 
@@ -12,4 +12,9 @@ MainWindow::MainWindow(QWidget *parent)
 MainWindow::~MainWindow()
 {
     delete ui;
+}
+
+void MainWindow::on_playbackButton_clicked()
+{
+    qDebug() << "Кнопка нажата!";
 }
