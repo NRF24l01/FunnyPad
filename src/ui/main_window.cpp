@@ -1,0 +1,15 @@
+#include "main_window.h"
+#include "ui_main.h"
+#include <QMessageBox>
+
+MainWindow::MainWindow(QWidget *parent)
+    : QMainWindow(parent)
+    , ui(new Ui::MainWindow)
+{
+    ui->setupUi(this);
+}
+
+MainWindow::~MainWindow()
+{
+    delete ui;
+}
