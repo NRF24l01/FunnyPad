@@ -170,6 +170,13 @@
         </item>
        </layout>
       </item>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_3">
+        <item>
+         <widget class="QComboBox" name="outputSelect"/>
+        </item>
+       </layout>
+      </item>
      </layout>
     </item>
    </layout>

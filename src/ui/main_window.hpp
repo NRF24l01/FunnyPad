@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include "SoundpadAudio.hpp"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -19,6 +20,7 @@ private slots:
 
 private:
     Ui::MainWindow *ui;
+    soundpad::SoundpadAudio audio;
 };
 
 #endif // MAINWINDOW_H
