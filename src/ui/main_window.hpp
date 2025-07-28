@@ -17,10 +17,15 @@ public:
 
 private slots:
     void on_playbackButton_clicked();
+    void on_musicProgress_sliderMoved(int value);
+    void on_playbackStarted(qint64 totalMs);
+    void on_playbackProgress(qint64 currentMs);
+    void on_playbackStopped();
 
 private:
     Ui::MainWindow *ui;
     soundpad::SoundpadAudio audio;
+    bool isPlaying = false;
 };
 
 #endif // MAINWINDOW_H

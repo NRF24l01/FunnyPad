@@ -7,74 +7,142 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+#include <QTimer>
+#include <QFileInfo>
+#include <QMetaObject>
+#include <thread>
+#include <chrono>
 
 namespace soundpad {
 
 SoundpadAudio::SoundpadAudio(const std::string& sinkName)
-    : sinkName_(sinkName)
+    : QObject(nullptr), sinkName_(sinkName)
 {
     qDebug() << "SoundpadAudio created with sink:" << QString::fromStdString(sinkName_);
 }
 
 SoundpadAudio::~SoundpadAudio()
 {
+    stop();
+    if (workerThread_.isRunning()) {
+        workerThread_.quit();
+        workerThread_.wait();
+    }
     qDebug() << "SoundpadAudio destroyed";
 }
 
 bool SoundpadAudio::playWav(const std::string& wavFilePath) {
+    stop();
+    currentFile_ = wavFilePath;
+    stopRequested_ = false;
+    seekToMs_ = -1;
+    std::thread([this, wavFilePath]() {
+        playbackThreadFunc(wavFilePath);
+    }).detach();
+    return true;
+}
+
+void SoundpadAudio::stop() {
+    QMutexLocker locker(&mutex_);
+    stopRequested_ = true;
+    seekCond_.wakeAll();
+}
+
+void SoundpadAudio::seek(qint64 ms) {
+    QMutexLocker locker(&mutex_);
+    seekToMs_ = ms;
+    seekCond_.wakeAll();
+}
+
+qint64 SoundpadAudio::currentTime() const {
+    QMutexLocker locker(&mutex_);
+    return currentMs_;
+}
+
+qint64 SoundpadAudio::totalTime() const {
+    QMutexLocker locker(&mutex_);
+    return totalMs_;
+}
+
+void SoundpadAudio::playbackThreadFunc(const std::string& wavFilePath) {
     std::ifstream file(wavFilePath, std::ios::binary);
     if (!file) {
-        std::cerr << "Cannot open WAV file: " << wavFilePath << std::endl;
-        return false;
+        qDebug() << "Не удалось открыть WAV файл:" << QString::fromStdString(wavFilePath);
+        emit playbackStopped();
+        return;
     }
-
-    // Пропускаем 44 байта заголовка WAV
-    file.seekg(44);
+    file.seekg(0, std::ios::end);
+    std::streampos fileSize = file.tellg();
+    file.seekg(44, std::ios::beg); // skip header
+    qint64 dataSize = static_cast<qint64>(fileSize) - 44;
+    qint64 bytesPerSec = 44100 * 2 * 2;
+    {
+        QMutexLocker locker(&mutex_);
+        totalMs_ = (dataSize * 1000) / bytesPerSec;
+        currentMs_ = 0;
+    }
+    emit playbackStarted(totalMs_);
 
     static const pa_sample_spec ss = {
         .format = PA_SAMPLE_S16LE,
         .rate = 44100,
         .channels = 2
     };
-
     int error;
     pa_simple *s = pa_simple_new(
-        nullptr,
-        "SoundpadApp",
-        PA_STREAM_PLAYBACK,
-        sinkName_.c_str(),
-        "playback",
-        &ss,
-        nullptr,
-        nullptr,
-        &error
+        nullptr, "SoundpadApp", PA_STREAM_PLAYBACK, sinkName_.c_str(),
+        "playback", &ss, nullptr, nullptr, &error
     );
-
     if (!s) {
-        std::cerr << "pa_simple_new() failed: " << pa_strerror(error) << std::endl;
-        return false;
+        emit playbackStopped();
+        return;
     }
 
     constexpr size_t bufferSize = 4096;
     std::vector<char> buffer(bufferSize);
+    qint64 playedBytes = 0;
 
-    while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0) {
-        if (pa_simple_write(s, buffer.data(), static_cast<size_t>(file.gcount()), &error) < 0) {
-            std::cerr << "pa_simple_write() failed: " << pa_strerror(error) << std::endl;
-            pa_simple_free(s);
-            return false;
+    while (true) {
+        {
+            QMutexLocker locker(&mutex_);
+            if (stopRequested_) break;
+            if (seekToMs_ >= 0) {
+                qint64 seekByte = (seekToMs_ * bytesPerSec) / 1000;
+                seekByte = std::min(seekByte, dataSize);
+                file.clear(); // сбросить флаги ошибок
+                file.seekg(44 + seekByte, std::ios::beg);
+                playedBytes = seekByte;
+                currentMs_ = seekToMs_;
+                seekToMs_ = -1;
+                // Если после seek мы в конце файла — завершить воспроизведение
+                if (seekByte >= dataSize) {
+                    break;
+                }
+            }
         }
-    }
+        file.read(buffer.data(), buffer.size());
+        std::streamsize bytesRead = file.gcount();
+        if (bytesRead <= 0) break; // конец файла или ошибка
 
-    if (pa_simple_drain(s, &error) < 0) {
-        std::cerr << "pa_simple_drain() failed: " << pa_strerror(error) << std::endl;
-        pa_simple_free(s);
-        return false;
+        size_t toWrite = static_cast<size_t>(bytesRead);
+        if (pa_simple_write(s, buffer.data(), toWrite, &error) < 0) break;
+        playedBytes += toWrite;
+        {
+            QMutexLocker locker(&mutex_);
+            currentMs_ = (playedBytes * 1000) / bytesPerSec;
+        }
+        emit playbackProgress(currentMs_);
+        // Вычисляем длительность блока в миллисекундах
+        double msPerBlock = (double)toWrite / (double)bytesPerSec * 1000.0;
+        if (msPerBlock > 0.0)
+            std::this_thread::sleep_for(std::chrono::milliseconds((int)msPerBlock));
     }
-
+    pa_simple_drain(s, &error);
     pa_simple_free(s);
-    return true;
+    emit playbackStopped();
 }
+
+
 std::vector<std::pair<std::string, std::string>> SoundpadAudio::getSourceList()
 {
     qDebug() << "getSourceList() called";
