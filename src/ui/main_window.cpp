@@ -77,11 +77,11 @@ void MainWindow::on_playbackButton_clicked()
             QMessageBox::warning(this, "Ошибка", "Не удалось воспроизвести файл:\n" + filePath);
             return;
         }
-        ui->playbackButton->setText("Stop");
+        ui->playbackButton->setIcon(QIcon(":/icons/resources/icons/stop.png"));
         isPlaying = true;
     } else {
         audio.stop();
-        ui->playbackButton->setText("Play");
+        ui->playbackButton->setIcon(QIcon(":/icons/resources/icons/play.png"));
         isPlaying = false;
     }
 }
@@ -99,7 +99,7 @@ void MainWindow::on_playbackStarted(qint64 totalMs)
     ui->currentMusicTime->setText("00:00");
     int sec = totalMs / 1000;
     ui->totalMusicTime->setText(QString("%1:%2").arg(sec/60,2,10,QChar('0')).arg(sec%60,2,10,QChar('0')));
-    ui->playbackButton->setText("Stop");
+    ui->playbackButton->setIcon(QIcon(":/icons/resources/icons/stop.png"));
     isPlaying = true;
 }
 
@@ -112,6 +112,6 @@ void MainWindow::on_playbackProgress(qint64 currentMs)
 
 void MainWindow::on_playbackStopped()
 {
-    ui->playbackButton->setText("Play");
+    ui->playbackButton->setIcon(QIcon(":/icons/resources/icons/play.png"));
     isPlaying = false;
 }
