@@ -15,14 +15,192 @@
 
 namespace soundpad {
 
+// Helper: Check if a sink exists
+bool SoundpadAudio::sinkExists(const std::string& sinkName) {
+    qDebug() << "[SoundpadAudio] Checking if sink exists:" << QString::fromStdString(sinkName);
+    pa_mainloop *ml = pa_mainloop_new();
+    pa_context *ctx = pa_context_new(pa_mainloop_get_api(ml), "SoundpadCheckSink");
+
+    struct SinkCheckContext {
+        std::string name;
+        bool found = false;
+        bool done = false;
+    } context{sinkName};
+
+    pa_context_set_state_callback(ctx, [](pa_context *c, void *userdata) {
+        auto *ctxData = static_cast<SinkCheckContext*>(userdata);
+        if (pa_context_get_state(c) == PA_CONTEXT_READY) {
+            pa_operation *op = pa_context_get_sink_info_list(
+                c,
+                [](pa_context *, const pa_sink_info *info, int eol, void *userdata) {
+                    auto *ctxData = static_cast<SinkCheckContext*>(userdata);
+                    if (eol > 0) {
+                        ctxData->done = true;
+                        return;
+                    }
+                    if (info && info->name) {
+                        if (ctxData->name == info->name) {
+                            ctxData->found = true;
+                        }
+                    }
+                },
+                userdata
+            );
+            if (op) pa_operation_unref(op);
+        }
+    }, &context);
+
+    pa_context_connect(ctx, nullptr, PA_CONTEXT_NOFLAGS, nullptr);
+    while (!context.done) pa_mainloop_iterate(ml, 1, nullptr);
+
+    pa_context_disconnect(ctx);
+    pa_context_unref(ctx);
+    pa_mainloop_free(ml);
+
+    return context.found;
+}
+
+// Helper: Check if a source exists
+bool SoundpadAudio::sourceExists(const std::string& sourceName) {
+    qDebug() << "[SoundpadAudio] Checking if source exists:" << QString::fromStdString(sourceName);
+    pa_mainloop *ml = pa_mainloop_new();
+    pa_context *ctx = pa_context_new(pa_mainloop_get_api(ml), "SoundpadCheckSource");
+
+    struct SourceCheckContext {
+        std::string name;
+        bool found = false;
+        bool done = false;
+    } context{sourceName};
+
+    pa_context_set_state_callback(ctx, [](pa_context *c, void *userdata) {
+        auto *ctxData = static_cast<SourceCheckContext*>(userdata);
+        if (pa_context_get_state(c) == PA_CONTEXT_READY) {
+            pa_operation *op = pa_context_get_source_info_list(
+                c,
+                [](pa_context *, const pa_source_info *info, int eol, void *userdata) {
+                    auto *ctxData = static_cast<SourceCheckContext*>(userdata);
+                    if (eol > 0) {
+                        ctxData->done = true;
+                        return;
+                    }
+                    if (info && info->name) {
+                        if (ctxData->name == info->name) {
+                            ctxData->found = true;
+                        }
+                    }
+                },
+                userdata
+            );
+            if (op) pa_operation_unref(op);
+        }
+    }, &context);
+
+    pa_context_connect(ctx, nullptr, PA_CONTEXT_NOFLAGS, nullptr);
+    while (!context.done) pa_mainloop_iterate(ml, 1, nullptr);
+
+    pa_context_disconnect(ctx);
+    pa_context_unref(ctx);
+    pa_mainloop_free(ml);
+
+    return context.found;
+}
+
+// Helper: Create null sink
+void SoundpadAudio::createNullSink(const std::string& sinkName) {
+    qDebug() << "[SoundpadAudio] Creating null sink:" << QString::fromStdString(sinkName);
+    pa_mainloop *ml = pa_mainloop_new();
+    pa_context *ctx = pa_context_new(pa_mainloop_get_api(ml), "SoundpadCreateSink");
+
+    struct SinkCreateContext {
+        std::string name;
+        bool done = false;
+    } context{sinkName};
+
+    pa_context_set_state_callback(ctx, [](pa_context *c, void *userdata) {
+        auto *ctxData = static_cast<SinkCreateContext*>(userdata);
+        if (pa_context_get_state(c) == PA_CONTEXT_READY) {
+            std::string args = "sink_name=" + ctxData->name +
+                               " sink_properties=device.description=" + ctxData->name;
+            pa_operation *op = pa_context_load_module(
+                c, "module-null-sink", args.c_str(),
+                [](pa_context *, uint32_t, void *userdata) {
+                    auto *ctxData = static_cast<SinkCreateContext*>(userdata);
+                    ctxData->done = true;
+                }, userdata
+            );
+            if (op) pa_operation_unref(op);
+        }
+    }, &context);
+
+    pa_context_connect(ctx, nullptr, PA_CONTEXT_NOFLAGS, nullptr);
+    while (!context.done) pa_mainloop_iterate(ml, 1, nullptr);
+
+    pa_context_disconnect(ctx);
+    pa_context_unref(ctx);
+    pa_mainloop_free(ml);
+}
+
+// Helper: Create remap source
+void SoundpadAudio::createRemapSource(const std::string& masterMonitor, const std::string& sourceName) {
+    qDebug() << "[SoundpadAudio] Creating remap source:" << QString::fromStdString(sourceName)
+             << "from master:" << QString::fromStdString(masterMonitor);
+    pa_mainloop *ml = pa_mainloop_new();
+    pa_context *ctx = pa_context_new(pa_mainloop_get_api(ml), "SoundpadCreateSource");
+
+    struct SourceCreateContext {
+        std::string master;
+        std::string name;
+        bool done = false;
+    } context{masterMonitor, sourceName};
+
+    pa_context_set_state_callback(ctx, [](pa_context *c, void *userdata) {
+        auto *ctxData = static_cast<SourceCreateContext*>(userdata);
+        if (pa_context_get_state(c) == PA_CONTEXT_READY) {
+            std::string args = "master=" + ctxData->master +
+                               " source_name=" + ctxData->name +
+                               " source_properties=device.description=" + ctxData->name;
+            pa_operation *op = pa_context_load_module(
+                c, "module-remap-source", args.c_str(),
+                [](pa_context *, uint32_t, void *userdata) {
+                    auto *ctxData = static_cast<SourceCreateContext*>(userdata);
+                    ctxData->done = true;
+                }, userdata
+            );
+            if (op) pa_operation_unref(op);
+        }
+    }, &context);
+
+    pa_context_connect(ctx, nullptr, PA_CONTEXT_NOFLAGS, nullptr);
+    while (!context.done) pa_mainloop_iterate(ml, 1, nullptr);
+
+    pa_context_disconnect(ctx);
+    pa_context_unref(ctx);
+    pa_mainloop_free(ml);
+}
+
+// Call this before playback or merging
+void SoundpadAudio::ensureAudioObjectsExist(const std::string& sinkName) {
+    qDebug() << "[SoundpadAudio] Ensuring audio objects exist for sink:" << QString::fromStdString(sinkName);
+    if (!sinkExists(sinkName)) {
+        createNullSink(sinkName);
+    }
+    std::string monitorName = sinkName + ".monitor";
+    if (!sourceExists("VirtualMic")) {
+        createRemapSource(monitorName, "VirtualMic");
+    }
+}
+
 SoundpadAudio::SoundpadAudio(const std::string& sinkName)
     : QObject(nullptr), sinkName_(sinkName)
 {
+    qDebug() << "[SoundpadAudio] Constructor called";
+    ensureAudioObjectsExist(sinkName_);
     qDebug() << "SoundpadAudio created with sink:" << QString::fromStdString(sinkName_);
 }
 
 SoundpadAudio::~SoundpadAudio()
 {
+    qDebug() << "[SoundpadAudio] Destructor called";
     stop();
     if (workerThread_.isRunning()) {
         workerThread_.quit();
@@ -32,6 +210,8 @@ SoundpadAudio::~SoundpadAudio()
 }
 
 bool SoundpadAudio::playWav(const std::string& wavFilePath) {
+    qDebug() << "[SoundpadAudio] playWav called for file:" << QString::fromStdString(wavFilePath);
+    ensureAudioObjectsExist(sinkName_);
     stop();
     currentFile_ = wavFilePath;
     stopRequested_ = false;
@@ -43,23 +223,27 @@ bool SoundpadAudio::playWav(const std::string& wavFilePath) {
 }
 
 void SoundpadAudio::stop() {
+    qDebug() << "[SoundpadAudio] stop called";
     QMutexLocker locker(&mutex_);
     stopRequested_ = true;
     seekCond_.wakeAll();
 }
 
 void SoundpadAudio::seek(qint64 ms) {
+    qDebug() << "[SoundpadAudio] seek called to ms:" << ms;
     QMutexLocker locker(&mutex_);
     seekToMs_ = ms;
     seekCond_.wakeAll();
 }
 
 qint64 SoundpadAudio::currentTime() const {
+    qDebug() << "[SoundpadAudio] currentTime called";
     QMutexLocker locker(&mutex_);
     return currentMs_;
 }
 
 qint64 SoundpadAudio::totalTime() const {
+    qDebug() << "[SoundpadAudio] totalTime called";
     QMutexLocker locker(&mutex_);
     return totalMs_;
 }
@@ -183,7 +367,7 @@ void SoundpadAudio::playbackThreadFunc(const std::string& wavFilePath) {
 
 std::vector<std::pair<std::string, std::string>> SoundpadAudio::getSourceList()
 {
-    qDebug() << "getSourceList() called";
+    qDebug() << "[SoundpadAudio] getSourceList called";
 
     pa_mainloop *ml = pa_mainloop_new();
     pa_context *ctx = pa_context_new(pa_mainloop_get_api(ml), "SoundpadContext");
@@ -241,6 +425,8 @@ std::vector<std::pair<std::string, std::string>> SoundpadAudio::getSourceList()
 
 bool SoundpadAudio::mergeWithMic(const std::string& sourceName)
 {
+    qDebug() << "[SoundpadAudio] mergeWithMic called for source:" << QString::fromStdString(sourceName);
+    ensureAudioObjectsExist(sinkName_);
     qDebug() << "Merging source with mic:" << QString::fromStdString(sourceName)
              << "into sink:" << QString::fromStdString(sinkName_);
 

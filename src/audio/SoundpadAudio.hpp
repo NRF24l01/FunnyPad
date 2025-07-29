@@ -35,6 +35,13 @@ signals:
 private:
     void playbackThreadFunc(const std::string& wavFilePath);
 
+    // PulseAudio helpers
+    static bool sinkExists(const std::string& sinkName);
+    static bool sourceExists(const std::string& sourceName);
+    static void createNullSink(const std::string& sinkName);
+    static void createRemapSource(const std::string& masterMonitor, const std::string& sourceName);
+    static void ensureAudioObjectsExist(const std::string& sinkName);
+
     std::string sinkName_;
     QThread workerThread_;
     mutable QMutex mutex_;
