@@ -2,6 +2,8 @@
 #include "ui_main.h"
 #include <QMessageBox>
 #include <QFile>
+#include <QStandardPaths>
+#include <QDir>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -11,12 +13,23 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
 
     auto sources = audio.getSourceList();
+
+    ui->outputSelect->clear();
+    ui->outputSelect->addItem("Select Audio Source", "");
+
     for (const auto& source : sources) {
         ui->outputSelect->addItem(QString::fromStdString(source.second), QString::fromStdString(source.first));
     }
 
     connect(ui->outputSelect, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         QString sourceName = ui->outputSelect->itemData(index).toString();
+        if (sourceName == "") {
+            return;
+        }
+        if (ui->outputSelect->count() > 0 && ui->outputSelect->itemData(0).toString() == "") {
+            ui->outputSelect->removeItem(0);
+        }
+        qDebug() << "Selected audio source:" << sourceName;
         if (!audio.mergeWithMic(sourceName.toStdString())) {
             QMessageBox::warning(this, "Error", "Failed to merge with selected audio source.");
         }
