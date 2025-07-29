@@ -12,6 +12,7 @@ pkg_check_modules(PULSE REQUIRED libpulse-simple)
 
 add_subdirectory(src/ui)
 add_subdirectory(src/audio)
+add_subdirectory(src/music_config)
 
 add_executable(funnypad
     src/main.cpp

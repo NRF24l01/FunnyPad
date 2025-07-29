@@ -9,6 +9,7 @@ add_library(ui STATIC
 target_link_libraries(ui
     Qt6::Widgets
     soundpad_audio
+    music_config
 )
 
 target_include_directories(ui PUBLIC
