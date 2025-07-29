@@ -13,5 +13,4 @@ target_link_libraries(ui
 
 target_include_directories(ui PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ../audio           # добавить путь к audio заголовкам
 )
