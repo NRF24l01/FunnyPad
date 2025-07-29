@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QSettings>
 #include "SoundpadAudio.hpp"
 
 QT_BEGIN_NAMESPACE
@@ -26,6 +27,9 @@ private:
     Ui::MainWindow *ui;
     soundpad::SoundpadAudio audio;
     bool isPlaying = false;
+
+    QSettings* settings;
+    QString data_path;
 };
 
 #endif // MAINWINDOW_H

@@ -12,6 +12,9 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
+    settings = new QSettings("nrf24l01", "FunnyPad");
+    qDebug() << "Settings path:" << settings->fileName();
+
     auto sources = audio.getSourceList();
 
     ui->outputSelect->clear();
@@ -33,19 +36,33 @@ MainWindow::MainWindow(QWidget *parent)
         if (!audio.mergeWithMic(sourceName.toStdString())) {
             QMessageBox::warning(this, "Error", "Failed to merge with selected audio source.");
         }
+        settings->setValue("audio_source", sourceName);
     });
+
+    QString savedSource = settings->value("audio_source", "").toString();
+    if (!savedSource.isEmpty()) {
+        int index = ui->outputSelect->findData(savedSource);
+        if (index != -1) {
+            ui->outputSelect->setCurrentIndex(index);
+        }
+    }
 
     connect(&audio, &soundpad::SoundpadAudio::playbackStarted, this, &MainWindow::on_playbackStarted);
     connect(&audio, &soundpad::SoundpadAudio::playbackProgress, this, &MainWindow::on_playbackProgress);
     connect(&audio, &soundpad::SoundpadAudio::playbackStopped, this, &MainWindow::on_playbackStopped);
 
     connect(ui->musicProgress, &QSlider::sliderMoved, this, &MainWindow::on_musicProgress_sliderMoved);
+
+    data_path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+
+    qDebug() << "Data path:" << data_path;
 }
 
 MainWindow::~MainWindow()
 {
     audio.stop();
     delete ui;
+    delete settings;
 }
 
 void MainWindow::on_playbackButton_clicked()
