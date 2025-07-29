@@ -81,7 +81,7 @@
           <item>
            <widget class="QLabel" name="currentMusicTime">
             <property name="text">
-             <string>TextLabel</string>
+             <string>Current</string>
             </property>
            </widget>
           </item>
@@ -95,7 +95,7 @@
           <item>
            <widget class="QLabel" name="totalMusicTime">
             <property name="text">
-             <string>TextLabel</string>
+             <string>Total</string>
             </property>
            </widget>
           </item>
