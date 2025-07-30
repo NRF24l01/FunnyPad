@@ -21,10 +21,12 @@ public:
 
     // Setters
     void setName(const QString& name);
+    void setCreatedDate(const QDateTime& date);
 
     // Track management
     bool addTrack(const QString& trackPath);
     bool addTrack(std::shared_ptr<Track> track);
+    bool addTrackWithoutProcessing(std::shared_ptr<Track> track);
     bool removeTrack(int index);
     void clear();
 

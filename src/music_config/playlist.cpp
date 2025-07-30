@@ -40,6 +40,10 @@ void Playlist::setName(const QString& name) {
     m_name = name;
 }
 
+void Playlist::setCreatedDate(const QDateTime& date) {
+    m_createdDate = date;
+}
+
 bool Playlist::addTrack(const QString& trackPath) {
     auto track = std::make_shared<Track>(trackPath);
     return addTrack(track);
@@ -57,6 +61,17 @@ bool Playlist::addTrack(std::shared_ptr<Track> track) {
         return false;
     }
     
+    m_tracks.append(track);
+    return true;
+}
+
+bool Playlist::addTrackWithoutProcessing(std::shared_ptr<Track> track) {
+    if (!track) {
+        qWarning() << "Cannot add null track to playlist";
+        return false;
+    }
+    
+    // Add without processing
     m_tracks.append(track);
     return true;
 }

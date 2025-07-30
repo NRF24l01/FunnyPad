@@ -206,6 +206,7 @@ void MainWindow::on_nextButton_clicked()
 
 void MainWindow::on_playlistList_currentRowChanged(int currentRow)
 {
+    // Don't stop playback when changing playlists
     currentPlaylistIndex = currentRow;
     currentTrackIndex = -1; // Reset track index
     updateTracksList();
@@ -333,6 +334,11 @@ void MainWindow::savePlaylistsToSettings()
 
 void MainWindow::playTrack(int trackIndex)
 {
+    // First, stop any currently playing audio
+    if (isPlaying) {
+        audio.stop();
+    }
+
     if (currentPlaylistIndex >= 0 && trackIndex >= 0) {
         auto playlist = playlistManager.getPlaylist(currentPlaylistIndex);
         if (playlist && trackIndex < playlist->getTrackCount()) {
@@ -343,11 +349,23 @@ void MainWindow::playTrack(int trackIndex)
                 if (audio.playWav(filePath.toStdString())) {
                     currentTrackIndex = trackIndex;
                     updateTracksList(); // Update to highlight the current track
+                    // Note: isPlaying will be set to true by the playbackStarted signal
                 } else {
                     QMessageBox::warning(this, tr("Error"), tr("Failed to play file:\n") + filePath);
                 }
             } else {
-                QMessageBox::warning(this, tr("Error"), tr("File not found:\n") + filePath);
+                // If processed file doesn't exist, try to process it again
+                if (track->processTrack()) {
+                    filePath = track->getProcessedPath();
+                    if (audio.playWav(filePath.toStdString())) {
+                        currentTrackIndex = trackIndex;
+                        updateTracksList();
+                    } else {
+                        QMessageBox::warning(this, tr("Error"), tr("Failed to play file:\n") + filePath);
+                    }
+                } else {
+                    QMessageBox::warning(this, tr("Error"), tr("File not found and processing failed:\n") + filePath);
+                }
             }
         }
     }

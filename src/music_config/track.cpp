@@ -54,10 +54,28 @@ void Track::setArtist(const QString& artist) {
     m_artist = artist;
 }
 
+void Track::setProcessedPath(const QString& path) {
+    m_processedPath = path;
+}
+
+void Track::setDuration(int duration) {
+    m_duration = duration;
+}
+
+void Track::setAddedDate(const QDateTime& date) {
+    m_addedDate = date;
+}
+
 bool Track::processTrack() {
     if (m_originalPath.isEmpty()) {
         qWarning() << "Cannot process track: original path is empty";
         return false;
+    }
+
+    // If the track has already been processed and the file exists, don't process again
+    if (!m_processedPath.isEmpty() && QFile::exists(m_processedPath)) {
+        qDebug() << "Track already processed, skipping:" << m_processedPath;
+        return true;
     }
 
     // Create app data directory if it doesn't exist
@@ -71,19 +89,21 @@ bool Track::processTrack() {
     QString outputFilename = generateUniqueFilename();
     m_processedPath = appDataPath + "/" + outputFilename;
 
-    // Prepare ffmpeg command
+    // Prepare ffmpeg command with properly quoted paths
     QProcess ffmpeg;
     QStringList arguments;
     
     // Input file
-    arguments << "-i" << m_originalPath;
+    arguments << "-i" << QDir::toNativeSeparators(m_originalPath);
     
     // Output format: WAV, 44100Hz, 16-bit stereo
     arguments << "-acodec" << "pcm_s16le"
               << "-ar" << "44100"
               << "-ac" << "2"
               << "-y"  // Overwrite output file if it exists
-              << m_processedPath;
+              << QDir::toNativeSeparators(m_processedPath);
+    
+    qDebug() << "Running ffmpeg with args:" << arguments.join(" ");
     
     // Execute ffmpeg
     ffmpeg.start("ffmpeg", arguments);

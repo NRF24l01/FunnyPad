@@ -111,6 +111,7 @@ bool PlaylistManager::loadPlaylists(const QString& filePath) {
         QJsonObject playlistObj = playlistValue.toObject();
         
         QString name = playlistObj["name"].toString();
+        QDateTime createdDate = QDateTime::fromString(playlistObj["created"].toString(), Qt::ISODate);
         auto playlist = std::make_shared<Playlist>(name);
         
         // Load tracks
@@ -118,13 +119,28 @@ bool PlaylistManager::loadPlaylists(const QString& filePath) {
         for (const auto& trackValue : tracksArray) {
             QJsonObject trackObj = trackValue.toObject();
             
+            // Create a track with original path
             auto track = std::make_shared<Track>(trackObj["originalPath"].toString());
+            
+            // Set properties from saved data
             track->setTitle(trackObj["title"].toString());
             track->setArtist(trackObj["artist"].toString());
             
-            // We don't need to process the track again if it already exists
-            // Just add it to the playlist
-            playlist->addTrack(track);
+            // Important: Set the processed path to avoid reprocessing
+            if (trackObj.contains("processedPath")) {
+                track->setProcessedPath(trackObj["processedPath"].toString());
+            }
+            
+            if (trackObj.contains("duration")) {
+                track->setDuration(trackObj["duration"].toInt());
+            }
+            
+            if (trackObj.contains("addedDate")) {
+                track->setAddedDate(QDateTime::fromString(trackObj["addedDate"].toString(), Qt::ISODate));
+            }
+            
+            // Add track to playlist without reprocessing
+            playlist->addTrackWithoutProcessing(track);
         }
         
         m_playlists.append(playlist);

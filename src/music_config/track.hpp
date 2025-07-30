@@ -20,6 +20,9 @@ public:
     // Setters
     void setTitle(const QString& title);
     void setArtist(const QString& artist);
+    void setProcessedPath(const QString& path);
+    void setDuration(int duration);
+    void setAddedDate(const QDateTime& date);
     
     // Process the track using ffmpeg and store it in the app data location
     // Returns true if processing was successful
