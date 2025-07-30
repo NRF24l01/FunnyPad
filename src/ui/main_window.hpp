@@ -6,6 +6,7 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QComboBox>
 #include "SoundpadAudio.hpp"
 #include "../music_config/PlaylistManager.hpp"
 

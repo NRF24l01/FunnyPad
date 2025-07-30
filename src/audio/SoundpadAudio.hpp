@@ -23,9 +23,18 @@ public:
 
     // Получить список всех источников звука: (имя, описание)
     std::vector<std::pair<std::string, std::string>> getSourceList();
+    
+    // Получить список всех устройств вывода: (имя, описание)
+    std::vector<std::pair<std::string, std::string>> getSinkList();
 
     // Подключить выбранный source к нашей sink через loopback
     bool mergeWithMic(const std::string& sourceName);
+    
+    // Установить устройство вывода для воспроизведения
+    void setOutputSink(const std::string& sinkName);
+    
+    // Получить текущее устройство вывода
+    std::string getOutputSink() const;
 
 signals:
     void playbackStarted(qint64 totalMs);
@@ -42,7 +51,8 @@ private:
     static void createRemapSource(const std::string& masterMonitor, const std::string& sourceName);
     static void ensureAudioObjectsExist(const std::string& sinkName);
 
-    std::string sinkName_;
+    std::string sinkName_;        // Virtual sink for mic merging
+    std::string outputSinkName_;  // Selected output device for playback
     QThread workerThread_;
     mutable QMutex mutex_;
     QWaitCondition seekCond_;

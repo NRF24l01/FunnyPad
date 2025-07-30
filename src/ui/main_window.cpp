@@ -26,6 +26,7 @@ MainWindow::MainWindow(QWidget *parent)
     settings = new QSettings("nrf24l01", "FunnyPad");
     qDebug() << "Settings path:" << settings->fileName();
 
+    // Setup mic input selector
     auto sources = audio.getSourceList();
 
     ui->outputSelect->clear();
@@ -55,6 +56,35 @@ MainWindow::MainWindow(QWidget *parent)
         int index = ui->outputSelect->findData(savedSource);
         if (index != -1) {
             ui->outputSelect->setCurrentIndex(index);
+        }
+    }
+    
+    // Setup output device selector
+    ui->audioOutputSelect->clear();
+    ui->audioOutputSelect->addItem("Default Output", "");
+    
+    auto sinks = audio.getSinkList();
+    qDebug() << "Found" << sinks.size() << "audio output devices";
+    for (const auto& sink : sinks) {
+        qDebug() << "Adding sink to UI:" << QString::fromStdString(sink.first) << "-" << QString::fromStdString(sink.second);
+        ui->audioOutputSelect->addItem(QString::fromStdString(sink.second), QString::fromStdString(sink.first));
+    }
+    
+    connect(ui->audioOutputSelect, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        QString sinkName = ui->audioOutputSelect->itemData(index).toString();
+        qDebug() << "Selected output sink:" << sinkName;
+        audio.setOutputSink(sinkName.toStdString());
+        settings->setValue("audio_output_sink", sinkName);
+    });
+    
+    // Set the output label to clarify that it's for headphones
+    ui->outputLabel->setText(tr("Headphones Output:"));
+    
+    QString savedSink = settings->value("audio_output_sink", "").toString();
+    if (!savedSink.isEmpty()) {
+        int index = ui->audioOutputSelect->findData(savedSink);
+        if (index != -1) {
+            ui->audioOutputSelect->setCurrentIndex(index);
         }
     }
 

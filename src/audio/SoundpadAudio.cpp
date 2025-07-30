@@ -191,7 +191,7 @@ void SoundpadAudio::ensureAudioObjectsExist(const std::string& sinkName) {
 }
 
 SoundpadAudio::SoundpadAudio(const std::string& sinkName)
-    : QObject(nullptr), sinkName_(sinkName)
+    : QObject(nullptr), sinkName_(sinkName), outputSinkName_("")
 {
     qDebug() << "[SoundpadAudio] Constructor called";
     ensureAudioObjectsExist(sinkName_);
@@ -247,123 +247,6 @@ qint64 SoundpadAudio::totalTime() const {
     QMutexLocker locker(&mutex_);
     return totalMs_;
 }
-
-void SoundpadAudio::playbackThreadFunc(const std::string& wavFilePath) {
-    qDebug() << "[SoundpadAudio] playbackThreadFunc started for file:" << QString::fromStdString(wavFilePath);
-    std::ifstream file(wavFilePath, std::ios::binary);
-    if (!file) {
-        qDebug() << "[SoundpadAudio] Не удалось открыть WAV файл:" << QString::fromStdString(wavFilePath);
-        emit playbackStopped();
-        return;
-    }
-    file.seekg(0, std::ios::end);
-    std::streampos fileSize = file.tellg();
-    file.seekg(44, std::ios::beg); // skip header
-    qint64 dataSize = static_cast<qint64>(fileSize) - 44;
-    qint64 bytesPerSec = 44100 * 2 * 2;
-    const qint64 blockAlign = 4; // 16-bit stereo PCM: 4 bytes per frame
-    qDebug() << "[SoundpadAudio] fileSize:" << static_cast<qint64>(fileSize)
-             << "dataSize:" << dataSize << "bytesPerSec:" << bytesPerSec;
-    {
-        QMutexLocker locker(&mutex_);
-        totalMs_ = (dataSize * 1000) / bytesPerSec;
-        currentMs_ = 0;
-    }
-    emit playbackStarted(totalMs_);
-
-    static const pa_sample_spec ss = {
-        .format = PA_SAMPLE_S16LE,
-        .rate = 44100,
-        .channels = 2
-    };
-    int error;
-    pa_simple *s = pa_simple_new(
-        nullptr, "SoundpadApp", PA_STREAM_PLAYBACK, sinkName_.c_str(),
-        "playback", &ss, nullptr, nullptr, &error
-    );
-    if (!s) {
-        qDebug() << "[SoundpadAudio] pa_simple_new failed:" << pa_strerror(error);
-        emit playbackStopped();
-        return;
-    }
-
-    constexpr size_t bufferSize = 4096;
-    std::vector<char> buffer(bufferSize);
-    qint64 playedBytes = 0;
-
-    while (true) {
-        {
-            QMutexLocker locker(&mutex_);
-            if (stopRequested_) {
-                qDebug() << "[SoundpadAudio] stopRequested_ set, breaking loop";
-                break;
-            }
-            if (seekToMs_ >= 0) {
-                qint64 seekByte = (seekToMs_ * bytesPerSec) / 1000;
-                seekByte = std::min(seekByte, dataSize);
-                // Align seekByte to blockAlign (round down)
-                seekByte = (seekByte / blockAlign) * blockAlign;
-                file.clear(); // сбросить флаги ошибок
-                file.seekg(44 + seekByte, std::ios::beg);
-                playedBytes = seekByte;
-                currentMs_ = seekToMs_;
-                qDebug() << "[SoundpadAudio] Seek requested to ms:" << seekToMs_
-                         << "seekByte:" << seekByte << "playedBytes:" << playedBytes;
-                seekToMs_ = -1;
-                // Если после seek мы в конце файла — завершить воспроизведение
-                if (playedBytes >= dataSize) {
-                    qDebug() << "[SoundpadAudio] Seeked to end of file, breaking loop";
-                    break;
-                }
-            }
-        }
-        // Проверка конца файла перед чтением
-        if (playedBytes >= dataSize) {
-            qDebug() << "[SoundpadAudio] playedBytes >= dataSize, breaking loop";
-            break;
-        }
-        // Читаем только оставшееся количество байт
-        size_t bytesLeft = static_cast<size_t>(dataSize - playedBytes);
-        if (bytesLeft == 0) {
-            qDebug() << "[SoundpadAudio] bytesLeft == 0, breaking loop";
-            break;
-        }
-        size_t readSize = std::min(buffer.size(), bytesLeft);
-        file.read(buffer.data(), readSize);
-        std::streamsize bytesRead = file.gcount();
-        if (bytesRead <= 0) {
-            qDebug() << "[SoundpadAudio] bytesRead <= 0, breaking loop";
-            break; // конец файла или ошибка
-        }
-        // Если bytesRead < buffer.size(), не отправлять остаток буфера (только bytesRead)
-        size_t toWrite = static_cast<size_t>(bytesRead);
-        if (toWrite > bytesLeft) {
-            toWrite = bytesLeft;
-        }
-        if (pa_simple_write(s, buffer.data(), toWrite, &error) < 0) {
-            qDebug() << "[SoundpadAudio] pa_simple_write failed:" << pa_strerror(error);
-            break;
-        }
-        playedBytes += toWrite;
-        {
-            QMutexLocker locker(&mutex_);
-            currentMs_ = (playedBytes * 1000) / bytesPerSec;
-        }
-        emit playbackProgress(currentMs_);
-        double msPerBlock = (double)toWrite / (double)bytesPerSec * 1000.0;
-        qDebug() << "[SoundpadAudio] playedBytes:" << playedBytes
-                 << "currentMs_:" << currentMs_
-                 << "toWrite:" << toWrite
-                 << "msPerBlock:" << msPerBlock;
-        if (msPerBlock > 0.0)
-            std::this_thread::sleep_for(std::chrono::milliseconds((int)msPerBlock));
-    }
-    pa_simple_drain(s, &error);
-    pa_simple_free(s);
-    qDebug() << "[SoundpadAudio] playbackThreadFunc finished";
-    emit playbackStopped();
-}
-
 
 std::vector<std::pair<std::string, std::string>> SoundpadAudio::getSourceList()
 {
@@ -422,6 +305,253 @@ std::vector<std::pair<std::string, std::string>> SoundpadAudio::getSourceList()
     qDebug() << "getSourceList() finished. Total:" << context.sources.size();
     return context.sources;
 }
+
+std::vector<std::pair<std::string, std::string>> SoundpadAudio::getSinkList()
+{
+    qDebug() << "[SoundpadAudio] getSinkList called";
+
+    pa_mainloop *ml = pa_mainloop_new();
+    pa_context *ctx = pa_context_new(pa_mainloop_get_api(ml), "SoundpadContext");
+
+    struct SinkListContext {
+        std::vector<std::pair<std::string, std::string>> sinks;
+        bool done = false;
+    } context;
+
+    pa_context_set_state_callback(ctx, [](pa_context *c, void *userdata) {
+        if (pa_context_get_state(c) == PA_CONTEXT_READY) {
+            qDebug() << "[SoundpadAudio] PA context ready, querying sink list";
+            pa_operation *op = pa_context_get_sink_info_list(
+                c,
+                [](pa_context *, const pa_sink_info *info, int eol, void *userdata) {
+                    auto *data = static_cast<SinkListContext*>(userdata);
+                    if (eol > 0) {
+                        data->done = true;
+                        qDebug() << "[SoundpadAudio] End of sink list";
+                        return;
+                    }
+                    if (info) {
+                        std::string name = info->name ? info->name : "";
+                        std::string desc = info->description ? info->description : "";
+
+                        // Include all sinks except our virtual one
+                        if (name != "SoundpadSink") {
+                            qDebug() << "[SoundpadAudio] Found sink:" << QString::fromStdString(name)
+                                     << "(" << QString::fromStdString(desc) << ")";
+                            data->sinks.emplace_back(name, desc);
+                        }
+                    }
+                },
+                userdata
+            );
+            if (op)
+                pa_operation_unref(op);
+            else
+                qDebug() << "[SoundpadAudio] Failed to create operation for getting sink list";
+        } else if (pa_context_get_state(c) == PA_CONTEXT_FAILED ||
+                   pa_context_get_state(c) == PA_CONTEXT_TERMINATED) {
+            qDebug() << "[SoundpadAudio] PA context failed or terminated";
+            static_cast<SinkListContext*>(userdata)->done = true;
+        }
+    }, &context);
+
+    if (pa_context_connect(ctx, nullptr, PA_CONTEXT_NOFLAGS, nullptr) < 0) {
+        qDebug() << "[SoundpadAudio] Failed to connect context:" << pa_strerror(pa_context_errno(ctx));
+        pa_context_unref(ctx);
+        pa_mainloop_free(ml);
+        return {};
+    }
+
+    // Wait for the operation to complete
+    int ret = 0;
+    while (!context.done && pa_mainloop_iterate(ml, 1, &ret) >= 0) {
+        // Just iterate until done
+    }
+
+    pa_context_disconnect(ctx);
+    pa_context_unref(ctx);
+    pa_mainloop_free(ml);
+
+    qDebug() << "[SoundpadAudio] getSinkList() finished. Total:" << context.sinks.size();
+    return context.sinks;
+}
+
+void SoundpadAudio::setOutputSink(const std::string& sinkName)
+{
+    qDebug() << "[SoundpadAudio] setOutputSink called with:" << QString::fromStdString(sinkName);
+    QMutexLocker locker(&mutex_);
+    outputSinkName_ = sinkName;
+}
+
+std::string SoundpadAudio::getOutputSink() const
+{
+    QMutexLocker locker(&mutex_);
+    return outputSinkName_;
+}
+
+// Modify playbackThreadFunc to use both the selected output sink and the virtual sink
+void SoundpadAudio::playbackThreadFunc(const std::string& wavFilePath) {
+    qDebug() << "[SoundpadAudio] playbackThreadFunc started for file:" << QString::fromStdString(wavFilePath);
+    std::ifstream file(wavFilePath, std::ios::binary);
+    if (!file) {
+        qDebug() << "[SoundpadAudio] Не удалось открыть WAV файл:" << QString::fromStdString(wavFilePath);
+        emit playbackStopped();
+        return;
+    }
+    file.seekg(0, std::ios::end);
+    std::streampos fileSize = file.tellg();
+    file.seekg(44, std::ios::beg); // skip header
+    qint64 dataSize = static_cast<qint64>(fileSize) - 44;
+    qint64 bytesPerSec = 44100 * 2 * 2;
+    const qint64 blockAlign = 4; // 16-bit stereo PCM: 4 bytes per frame
+    qDebug() << "[SoundpadAudio] fileSize:" << static_cast<qint64>(fileSize)
+             << "dataSize:" << dataSize << "bytesPerSec:" << bytesPerSec;
+    {
+        QMutexLocker locker(&mutex_);
+        totalMs_ = (dataSize * 1000) / bytesPerSec;
+        currentMs_ = 0;
+    }
+    emit playbackStarted(totalMs_);
+
+    static const pa_sample_spec ss = {
+        .format = PA_SAMPLE_S16LE,
+        .rate = 44100,
+        .channels = 2
+    };
+    
+    int error;
+    
+    // Determine which sink to use for user's headphones
+    std::string headphonesSink;
+    {
+        QMutexLocker locker(&mutex_);
+        headphonesSink = outputSinkName_;
+    }
+    
+    // Create a client for the virtual sink (for mic) and a client for the headphones
+    pa_simple *virtualSink = nullptr;
+    pa_simple *headphonesOutput = nullptr;
+    
+    // Always connect to the virtual sink for mic merging
+    virtualSink = pa_simple_new(
+        nullptr, "SoundpadAppVirtual", PA_STREAM_PLAYBACK, sinkName_.c_str(),
+        "virtual-playback", &ss, nullptr, nullptr, &error
+    );
+    
+    if (!virtualSink) {
+        qDebug() << "[SoundpadAudio] Failed to connect to virtual sink:" << pa_strerror(error);
+        emit playbackStopped();
+        return;
+    }
+    
+    // Connect to the headphones output if specified
+    if (!headphonesSink.empty()) {
+        qDebug() << "[SoundpadAudio] Also connecting to headphones sink:" << QString::fromStdString(headphonesSink);
+        headphonesOutput = pa_simple_new(
+            nullptr, "SoundpadAppHeadphones", PA_STREAM_PLAYBACK, headphonesSink.c_str(),
+            "headphones-playback", &ss, nullptr, nullptr, &error
+        );
+        
+        if (!headphonesOutput) {
+            qDebug() << "[SoundpadAudio] Failed to connect to headphones sink:" << pa_strerror(error);
+            // Continue anyway - we'll still output to the virtual sink
+        }
+    }
+    
+    constexpr size_t bufferSize = 4096;
+    std::vector<char> buffer(bufferSize);
+    qint64 playedBytes = 0;
+
+    while (true) {
+        {
+            QMutexLocker locker(&mutex_);
+            if (stopRequested_) {
+                qDebug() << "[SoundpadAudio] stopRequested_ set, breaking loop";
+                break;
+            }
+            if (seekToMs_ >= 0) {
+                qint64 seekByte = (seekToMs_ * bytesPerSec) / 1000;
+                seekByte = std::min(seekByte, dataSize);
+                // Align seekByte to blockAlign (round down)
+                seekByte = (seekByte / blockAlign) * blockAlign;
+                file.clear(); // сбросить флаги ошибок
+                file.seekg(44 + seekByte, std::ios::beg);
+                playedBytes = seekByte;
+                currentMs_ = seekToMs_;
+                qDebug() << "[SoundpadAudio] Seek requested to ms:" << seekToMs_
+                         << "seekByte:" << seekByte << "playedBytes:" << playedBytes;
+                seekToMs_ = -1;
+                // Если после seek мы в конце файла — завершить воспроизведение
+                if (playedBytes >= dataSize) {
+                    qDebug() << "[SoundpadAudio] Seeked to end of file, breaking loop";
+                    break;
+                }
+            }
+        }
+        // Проверка конца файла перед чтением
+        if (playedBytes >= dataSize) {
+            qDebug() << "[SoundpadAudio] playedBytes >= dataSize, breaking loop";
+            break;
+        }
+        // Читаем только оставшееся количество байт
+        size_t bytesLeft = static_cast<size_t>(dataSize - playedBytes);
+        if (bytesLeft == 0) {
+            qDebug() << "[SoundpadAudio] bytesLeft == 0, breaking loop";
+            break;
+        }
+        size_t readSize = std::min(buffer.size(), bytesLeft);
+        file.read(buffer.data(), readSize);
+        std::streamsize bytesRead = file.gcount();
+        if (bytesRead <= 0) {
+            qDebug() << "[SoundpadAudio] bytesRead <= 0, breaking loop";
+            break; // конец файла или ошибка
+        }
+        // Если bytesRead < buffer.size(), не отправлять остаток буфера (только bytesRead)
+        size_t toWrite = static_cast<size_t>(bytesRead);
+        if (toWrite > bytesLeft) {
+            toWrite = bytesLeft;
+        }
+        
+        // Write to virtual sink (for mic)
+        if (pa_simple_write(virtualSink, buffer.data(), toWrite, &error) < 0) {
+            qDebug() << "[SoundpadAudio] pa_simple_write to virtual sink failed:" << pa_strerror(error);
+            // Continue anyway, don't break the loop
+        }
+        
+        // Write to headphones if connected
+        if (headphonesOutput) {
+            if (pa_simple_write(headphonesOutput, buffer.data(), toWrite, &error) < 0) {
+                qDebug() << "[SoundpadAudio] pa_simple_write to headphones failed:" << pa_strerror(error);
+                // Continue anyway, don't break the loop
+            }
+        }
+        
+        playedBytes += toWrite;
+        {
+            QMutexLocker locker(&mutex_);
+            currentMs_ = (playedBytes * 1000) / bytesPerSec;
+        }
+        emit playbackProgress(currentMs_);
+        double msPerBlock = (double)toWrite / (double)bytesPerSec * 1000.0;
+        if (msPerBlock > 0.0)
+            std::this_thread::sleep_for(std::chrono::milliseconds((int)msPerBlock));
+    }
+    
+    // Drain and free both outputs
+    if (virtualSink) {
+        pa_simple_drain(virtualSink, &error);
+        pa_simple_free(virtualSink);
+    }
+    
+    if (headphonesOutput) {
+        pa_simple_drain(headphonesOutput, &error);
+        pa_simple_free(headphonesOutput);
+    }
+    
+    qDebug() << "[SoundpadAudio] playbackThreadFunc finished";
+    emit playbackStopped();
+}
+
 
 bool SoundpadAudio::mergeWithMic(const std::string& sourceName)
 {
